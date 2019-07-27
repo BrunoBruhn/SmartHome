@@ -8,7 +8,7 @@ def optim(duration,LP,capacity,P_charge_max,P_discharge_max,eta_n):
 	for t in range(duration):
 
 		if t==0:
-			LP += E_battery[t]==60*P_charge[t]
+			LP += E_battery[t]==60*P_charge[t]*eta_n
 
 		else:
 			LP += E_battery[t]==E_battery[t-1]+60*P_charge[t]*eta_n

@@ -6,7 +6,7 @@ from gurobipy import *
 ########################################################################################
 'INITIALIZE PROBLEM'
 
-duration=1440 #
+duration=1440*6 #
 #init problem and creating object-independent LP variables
 LP = pulp.LpProblem('LP',pulp.LpMinimize)  
 
@@ -39,12 +39,30 @@ Price_export = 10.64 # (Juni 2019, Germany)
 'ADDING BATTERY OBJECT'
 
 import battery
-E_battery_max=10 #kWh 
+E_battery_max=10 	#kWh 
 eta_n=1
-P_charge_max=20
-P_discharge_max=20
+P_charge_max=2		#kW
+P_discharge_max=2	#kW
 
+#add battery variables
 E_battery,P_charge = battery.optim(duration,LP,E_battery_max*3600,P_charge_max,P_discharge_max,eta_n)
+
+########################################################################################
+'ADDING WATER HEATER OBJECT'
+
+import water_heater
+Tank_volume=500 #liter
+T_min=40 		#celsius
+T_max=95		#celsius
+T_ambient=23	#celsius
+P_max=5 		#kW
+EEC='C' 		# EU energy efficiency class 
+
+#create hot water demand list
+Q_DHW = df['DHW'].tolist()
+
+#add waterheater variables
+T_tank,P_waterheater = water_heater.optim(duration,LP,Q_DHW,Tank_volume,T_min,T_max,T_ambient,P_max,EEC)
 
 
 ########################################################################################
@@ -52,7 +70,7 @@ E_battery,P_charge = battery.optim(duration,LP,E_battery_max*3600,P_charge_max,P
 
 for t in range(duration):
 
-	LP += PV_production[t] -EL_consumption[t] -P_charge[t] == Export[t] - Import[t]
+	LP += PV_production[t] -EL_consumption[t] -P_charge[t] - P_waterheater[t] == Export[t] - Import[t]
 
 	LP += Cost[t]==Import[t]*Price_import[t]-Export[t]*Price_export
 
@@ -69,22 +87,49 @@ Import_values=[]
 Export_values=[]
 Energy_levels=[]
 P_charge_values=[]
+T_tank_values=[]
+P_waterheater_values=[]
 
 for i in range(duration):
 	Import_values.append(Import[i].value())
 	Export_values.append(Export[i].value())
-	Energy_levels.append(E_battery[i].value()/10**4)
+	Energy_levels.append(E_battery[i].value()/360) #now ckWh
 	P_charge_values.append(P_charge[i].value())
+	T_tank_values.append(T_tank[i].value())
+	P_waterheater_values.append(P_waterheater[i].value())
 
 ########################################################################################
 'PLOT PROFILES'
 
+# BATTERY
+plt.figure()
+#plt.hold(True)
+plt.plot(PV_production[:duration],label="PV")
+plt.plot(EL_consumption[:duration],label="EL")
+plt.plot(Energy_levels[:duration],label="E_Battery")
+plt.plot(P_charge_values[:duration],label='P_charge')
+plt.title('Battery')
+plt.legend()
+
+#IMPORT EXPORT
+plt.figure()
+#plt.hold(True)
 plt.plot(PV_production[:duration],label="PV")
 plt.plot(EL_consumption[:duration],label="EL")
 plt.plot(Export_values[:duration],label="EXP")
 plt.plot(Import_values[:duration],label="IMP")
-plt.plot(Energy_levels[:duration],label="E battery")
-plt.plot(Price_import[:duration],label='Price_import')
-plt.plot(P_charge_values[:duration],label='P_charge')
+plt.title('Import/Export')
 plt.legend()
+
+#WATER HEATER
+plt.figure()
+#plt.hold(True)
+plt.plot(Q_DHW[:duration],label="Q_DHW")
+plt.plot(P_waterheater_values[:duration],label="P_waterheater")
+plt.plot(T_tank_values[:duration],label="T_tank")
+plt.title('Water heater')
+plt.legend()
+
+
 plt.show()
+
