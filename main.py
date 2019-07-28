@@ -5,132 +5,120 @@ from gurobipy import *
 from models import *
 
 ########################################################################################
+########################################################################################
+
+'--IMPORT DATA--'
+# Data has to be put in the file 'profiles.csv'
+
+df=pd.read_csv('profiles.csv')
+df=df.round(decimals=3)
+
+PV_production = df['PV'].tolist()
+EL_consumption = df['EL'].tolist()
+Price_import = df['CP_IM'].tolist()
+Q_DHW = df['DHW'].tolist()
+T_outside = df['T_OUT'].tolist()
+
+Price_export = 10 # (Juni 2019, Germany)
+########################################################################################
+########################################################################################
 'INITIALIZE PROBLEM'
 
-duration=1440
- #
+duration=1440*7
+
 #init problem and creating object-independent LP variables
 LP = pulp.LpProblem('LP',pulp.LpMinimize)  
 
-Import = pulp.LpVariable.dicts("Import", range(duration), lowBound=0,cat=pulp.LpContinuous )
+Import = pulp.LpVariable.dicts("Import", range(duration), lowBound=0,cat=pulp.LpContinuous)
 Export = pulp.LpVariable.dicts("Export", range(duration), lowBound=0,cat=pulp.LpContinuous)
 Cost = 	 pulp.LpVariable.dicts("Cost", range(duration), cat=pulp.LpContinuous)
 
 MAX_solving_time = 60 #seconds
 MAX_gap = None
 
-########################################################################################
-'IMPORT DATA'
-# Data has to be put in the file 'profiles.csv'
-
-# create dataframe from csv
-df=pd.read_csv('profiles.csv')
-df=df.round(decimals=3)
-
-#create PV production list
-PV_production = df['PV'].tolist()
-
-#create electrical demand list
-EL_consumption = df['EL'].tolist()
-
-#create electricity pricing list
-Price_import = df['CP_IM'].tolist()
-Price_export = 10 # (Juni 2019, Germany)
+SmartHome=SmartHome(duration,LP)
 
 ########################################################################################
-'CREATING HOUSE OBJECT'
-
-room_area=20 		# sq meters
-room_surface=2*(10+12.5+room_area)
-room_height=2.5
-
-T_house_initial=22
-T_min_house=18		#celsius
-T_max_house=22		#celsius
-
-
-average_U_value=0.5 #W/m2k
-
-House1 = house(room_area,room_surface,room_height,average_U_value,T_min_house,T_max_house,T_house_initial)
-
 ########################################################################################
-'ADDING BATTERY OBJECT'
 
-E_battery_max=0 	#kWh 
-eta_n_battery=0.9
-P_charge_battery_max=20		#kW
-P_discharge_max=20	#kW
+'--SET PARAMETERS--'
+################################################
+'HOUSE'
 
-#add battery variables
-E_battery,P_charge_battery = battery.optim(duration,LP,E_battery_max*3600,P_charge_battery_max,P_discharge_max,eta_n_battery)
+room_area = 20 			#sqm
+room_surface = 2 * (10 + 12.5 + room_area) #sqm
+room_height = 2.5		#m
+T_house_initial= 22		#celsius
+T_min_house = 18		#celsius
+T_max_house = 22		#celsius
+average_U_value = 0.5 	#W/m2k
 
-########################################################################################
-'ADDING WATER HEATER OBJECT'
+House = House(room_area,room_surface,room_height,average_U_value,T_min_house,T_max_house,T_house_initial)
+################################################
+'WATER HEATER'
 
 Tank_volume=5000 			#liter
 T_min_waterheater=40 		#celsius
 T_max_waterheater=95		#celsius
 T_ambient=23				#celsius
 P_max_waterheater=50 		#kW
-EEC='C' 					# EU energy efficiency class 
+EEC='C' 					#EU energy efficiency class 
 
-#create hot water demand list
-Q_DHW = df['DHW'].tolist()
-
-#add waterheater variables
-T_tank,P_waterheater = water_heater.optim(duration,LP,Q_DHW,Tank_volume,T_min_waterheater,T_max_waterheater,T_ambient,P_max_waterheater,EEC)
-
-
-########################################################################################
-'ADDING HEAT PUMP AND AIRCONDITIONING'
+water_heater = WaterHeater(Q_DHW,Tank_volume,T_min_waterheater,T_max_waterheater,T_ambient,P_max_waterheater,EEC,SmartHome)
+################################################
+'AIRCON AND HEAT PUMP'
 
 COP=3 			
 P_max_el_heatpump=3000	#kW
-
 eta_n_aircon=0.3
-P_el_max_aircon=10000 	#kW
+P_max_el_aircon=10000 	#kW
 
-#create outside temperature list
-T_outside = df['T_OUT'].tolist()
+heating_cooling = Aircon_Heatpump(COP,P_max_el_heatpump,eta_n_aircon,P_max_el_aircon,T_outside,SmartHome)
+################################################
+'BATTERY'
 
-#add house heating variables
-T_house,P_heatpump,P_aircon = heatpump.optim(House1,duration,LP,T_outside,P_max_el_heatpump,COP,P_el_max_aircon,eta_n_aircon)
+E_battery_max=0 		#kWh 
+eta_n_battery=0.9
+P_charge_battery_max=20	#kW
+P_discharge_max=20		#kW
 
+battery = Battery(E_battery_max*3600,P_charge_battery_max,P_discharge_max,eta_n_battery,SmartHome)
+################################################
+'ELECTRIC VEHICLE'
 
-"""
+car_battery_capacity=40 		#kWh
+P_car_charge_max=20  			#kW
+charge_hour_start=18 			#o'clock
+charge_hour_stop=8				#o'clock
+eta_n_ev_charging_station=0.0001
+
+electric_vehicle = EV(car_battery_capacity*3600,P_car_charge_max,charge_hour_stop,charge_hour_start,eta_n_ev_charging_station,SmartHome)
+
 ########################################################################################
+'ADDING CONSTRAINTS'
 
-'ADDING ELECTRIC VEHICLE'
+T_tank,P_waterheater = water_heater.opti()
 
-import electric_vehicle
+T_house,P_heatpump,P_aircon = heating_cooling.opti(House)
 
-room_size=40 		# sq meters
-T_min_house=21 		#celsius
-T_max_house=30		#celsius
-T_outside=10		#celsius
-COP=3 			
-P_max_heatpump=0.1 	#kW
-heat_loss=0.005 	#kW/K 	
+E_battery,P_charge_battery = battery.opti()
 
-#add house heating variables
-E_EV,P_charge_EV = electric_vehicle.optim(duration,LP,driving_schedule)
-"""
+E_EV,u_charge_EV= electric_vehicle.opti()
+
 ########################################################################################
 'SET UP ENERGY BALANCE AND OBJECTIVE, THEN SOLVE'
 
 for t in range(duration):
 
-	LP += PV_production[t] -EL_consumption[t] -P_charge_battery[t] - P_waterheater[t]-P_heatpump[t]-P_aircon[t] == Export[t] - Import[t]
+	LP += PV_production[t] - EL_consumption[t] - P_charge_battery[t] - P_waterheater[t] - P_heatpump[t] - P_aircon[t] - P_car_charge_max*u_charge_EV[t] == Export[t] - Import[t]
 
-	LP += Cost[t]==Import[t]*Price_import[t]-Export[t]*Price_export
+	LP += Cost[t] == Import[t] * Price_import[t] - Export[t] * Price_export
 
 LP += sum([Cost[t] for t in range(duration)])
 
 status = LP.solve(pulp.solvers.GUROBI(mip=True, msg=True, timeLimit=MAX_solving_time,epgap=MAX_gap))
 
 print( 'LP status: ' + pulp.LpStatus[status] + '')
-
-#print(LP)
 
 ########################################################################################
 'CREATE LISTS CONTAINING THE VARIABLE PROFILES'
@@ -144,6 +132,8 @@ P_waterheater_values=[]
 T_house_values=[]
 Q_spaceheater_values=[] # heatpump
 Q_aircon_values=[] 
+E_EV_values=[]
+#P_charge_EV_values=[]
 
 for i in range(duration):
 	Import_values.append(Import[i].value())
@@ -155,13 +145,14 @@ for i in range(duration):
 	T_house_values.append(T_house[i].value())
 	Q_spaceheater_values.append(P_heatpump[i].value()*COP*100)
 	Q_aircon_values.append(P_aircon[i].value()*eta_n_aircon*100)
+	E_EV_values.append(E_EV[i].value()/360) #now ckWh
+	#P_charge_EV_values.append(P_charge_EV[i].value())
 
 ########################################################################################
 'PLOT PROFILES'
 
 # BATTERY
 plt.figure()
-#plt.hold(True)
 plt.plot(PV_production[:duration],label="PV")
 plt.plot(EL_consumption[:duration],label="EL")
 plt.plot(Battery_levels[:duration],label="E_Battery")
@@ -171,24 +162,20 @@ plt.legend()
 
 #IMPORT EXPORT
 plt.figure()
-#plt.hold(True)
 plt.plot(PV_production[:duration],label="PV")
 plt.plot(EL_consumption[:duration],label="EL")
-plt.plot(Export_values[:duration],label="EXP")
-plt.plot(Import_values[:duration],label="IMP")
+plt.plot(Export_values[:duration],label="Export")
+plt.plot(Import_values[:duration],label="Import")
 plt.title('Import/Export')
 plt.legend()
 
 #WATER HEATER
 plt.figure()
-#plt.hold(True)
 plt.plot(Q_DHW[:duration],label="Q_DHW")
 plt.plot(P_waterheater_values[:duration],label="P_waterheater")
 plt.plot(T_tank_values[:duration],label="T_tank")
 plt.title('Water heater')
 plt.legend()
-
-
 
 #SPACE HEATER
 plt.figure()
@@ -200,11 +187,14 @@ plt.plot(Q_aircon_values[:duration],label="Q_aircon")
 plt.title('Space Heating and Cooling')
 plt.legend()
 
+# EV
+plt.figure()
+plt.plot(E_EV_values[:duration],label="E_EV")
+#plt.plot(P_charge_EV_values[:duration],label="EV_charge")
+plt.title('Electric Vehicle')
+plt.legend()
+
 plt.show()
-
-
-
-
 
 # create dataframe containing results
 df_results = pd.DataFrame() 
@@ -220,6 +210,4 @@ df_results['T_house[*C]']=T_house_values[:duration]
 df_results['Q_spaceheater[kW]']=Q_spaceheater_values[:duration]
 df_results['Q_aircon[kW]']=Q_aircon_values[:duration]
 
-
 df_results.to_csv(r'Results.csv')
-# T_tank_values,P_waterheater_values,T_house_values,T_house_values,Q_spaceheater_values
