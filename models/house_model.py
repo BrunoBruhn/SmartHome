@@ -10,6 +10,4 @@ class house(object):
 		self.T_house_initial=T_house_initial
 
 		self.q_loss=self.average_U_value*self.room_surface/1000 #kW/K
-
-
 		self.mcp=self.room_area*self.room_height*1.2 #kJ/K
